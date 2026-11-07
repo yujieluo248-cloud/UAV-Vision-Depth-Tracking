@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# ROS
+build/
+devel/
+logs/
+
+# Data
+data/*
+!data/.gitkeep
+
+# Outputs
+outputs/*
+!outputs/.gitkeep
+
+# RealSense / recordings
+*.bag
+
+# Videos
+*.mp4
+*.avi
+*.mov
+
+# IDE
+.vscode/
+.idea/
+
+# System
+.DS_Store
+Thumbs.db

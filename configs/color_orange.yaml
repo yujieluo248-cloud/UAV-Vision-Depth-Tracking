@@ -1,0 +1,6 @@
+# Baseline starting values only. Calibrate for the real target, material,
+# camera settings, and lighting conditions.
+lower_hsv: [5, 150, 150]
+upper_hsv: [22, 255, 255]
+min_area: 500
+morph_kernel_size: 5

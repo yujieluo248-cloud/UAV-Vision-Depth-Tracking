@@ -25,7 +25,9 @@ DEFAULT_OUTPUT_ROOT = Path("outputs/test")
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp"}
 CSV_FIELDS = (
     "filename",
+    "expected",
     "detected",
+    "classification",
     "center_x",
     "center_y",
     "bbox_x",
@@ -43,6 +45,39 @@ class BatchSummary:
     detected: int
     no_detection: int
     errors: int
+    labeled_positive: int
+    labeled_negative: int
+    unlabeled: int
+    true_positive: int
+    false_negative: int
+    true_negative: int
+    false_positive: int
+
+
+def expected_from_filename(filename: str) -> str:
+    """Infer the expected class from the dataset filename convention."""
+    name = Path(filename).name.casefold()
+    if name.startswith("orange_"):
+        return "positive"
+    if name.startswith("negative_"):
+        return "negative"
+    return "unknown"
+
+
+def classify_detection(expected: str, detected: bool) -> str:
+    """Return a confusion-matrix class for one detection result."""
+    if expected == "positive":
+        return "TP" if detected else "FN"
+    if expected == "negative":
+        return "FP" if detected else "TN"
+    return "UNLABELED"
+
+
+def format_rate(numerator: int, denominator: int) -> str:
+    """Format an evaluation rate, including empty labeled subsets."""
+    if denominator == 0:
+        return "N/A"
+    return f"{numerator / denominator:.4f}"
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -108,9 +143,12 @@ def _annotate_result(
 
 
 def _result_row(filename: str, detection: ColorDetection) -> dict[str, object]:
+    expected = expected_from_filename(filename)
     row: dict[str, object] = {
         "filename": filename,
+        "expected": expected,
         "detected": str(detection.detected).lower(),
+        "classification": classify_detection(expected, detection.detected),
         "center_x": "",
         "center_y": "",
         "bbox_x": "",
@@ -159,6 +197,15 @@ def run_batch(
     processed = 0
     detected_count = 0
     error_count = 0
+    counts = {
+        "positive": 0,
+        "negative": 0,
+        "unknown": 0,
+        "TP": 0,
+        "FN": 0,
+        "TN": 0,
+        "FP": 0,
+    }
     total = len(image_files)
 
     with (output_dir / "results.csv").open(
@@ -186,7 +233,11 @@ def run_batch(
             if not cv2.imwrite(str(annotated_path), annotated):
                 raise RuntimeError(f"Could not write output: {annotated_path}")
 
-            writer.writerow(_result_row(image_path.name, detection))
+            row = _result_row(image_path.name, detection)
+            writer.writerow(row)
+            counts[str(row["expected"])] += 1
+            if row["classification"] != "UNLABELED":
+                counts[str(row["classification"])] += 1
             processed += 1
             if detection.detected:
                 detected_count += 1
@@ -199,6 +250,21 @@ def run_batch(
     print(f"Processed: {processed}")
     print(f"Detected: {detected_count}")
     print(f"No detection: {no_detection_count}")
+    print(f"Labeled positive: {counts['positive']}")
+    print(f"Labeled negative: {counts['negative']}")
+    print(f"Unlabeled: {counts['unknown']}")
+    print(f"TP: {counts['TP']}")
+    print(f"FN: {counts['FN']}")
+    print(f"TN: {counts['TN']}")
+    print(f"FP: {counts['FP']}")
+    print(
+        "Recall: "
+        f"{format_rate(counts['TP'], counts['TP'] + counts['FN'])}"
+    )
+    print(
+        "False positive rate: "
+        f"{format_rate(counts['FP'], counts['FP'] + counts['TN'])}"
+    )
     print(f"Output directory: {output_dir}")
 
     return BatchSummary(
@@ -207,6 +273,13 @@ def run_batch(
         detected=detected_count,
         no_detection=no_detection_count,
         errors=error_count,
+        labeled_positive=counts["positive"],
+        labeled_negative=counts["negative"],
+        unlabeled=counts["unknown"],
+        true_positive=counts["TP"],
+        false_negative=counts["FN"],
+        true_negative=counts["TN"],
+        false_positive=counts["FP"],
     )
 
 

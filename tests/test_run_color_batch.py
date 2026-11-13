@@ -67,8 +67,8 @@ def test_batch_writes_two_output_pairs_no_detection_annotation_and_csv(
     batch = load_batch_module()
     input_dir = tmp_path / "images"
     input_dir.mkdir()
-    write_image(input_dir / "orange.jpg", orange_target=True)
-    write_image(input_dir / "black.png", orange_target=False)
+    write_image(input_dir / "orange_001.jpg", orange_target=True)
+    write_image(input_dir / "negative_001.png", orange_target=False)
     config_path = tmp_path / "config.yaml"
     write_config(config_path)
 
@@ -85,16 +85,21 @@ def test_batch_writes_two_output_pairs_no_detection_annotation_and_csv(
     assert summary.detected == 1
     assert summary.no_detection == 1
     assert summary.errors == 0
+    assert summary.labeled_positive == 1
+    assert summary.labeled_negative == 1
+    assert summary.unlabeled == 0
+    assert (summary.true_positive, summary.false_negative) == (1, 0)
+    assert (summary.true_negative, summary.false_positive) == (1, 0)
     assert sorted(path.name for path in output_dir.glob("*_mask.png")) == [
-        "black_mask.png",
-        "orange_mask.png",
+        "negative_001_mask.png",
+        "orange_001_mask.png",
     ]
     assert sorted(path.name for path in output_dir.glob("*_annotated.png")) == [
-        "black_annotated.png",
-        "orange_annotated.png",
+        "negative_001_annotated.png",
+        "orange_001_annotated.png",
     ]
 
-    black_annotated = cv2.imread(str(output_dir / "black_annotated.png"))
+    black_annotated = cv2.imread(str(output_dir / "negative_001_annotated.png"))
     assert black_annotated is not None
     assert cv2.countNonZero(cv2.cvtColor(black_annotated, cv2.COLOR_BGR2GRAY)) > 0
 
@@ -104,7 +109,9 @@ def test_batch_writes_two_output_pairs_no_detection_annotation_and_csv(
         rows = list(csv.DictReader(csv_file))
     assert list(rows[0]) == [
         "filename",
+        "expected",
         "detected",
+        "classification",
         "center_x",
         "center_y",
         "bbox_x",
@@ -113,10 +120,15 @@ def test_batch_writes_two_output_pairs_no_detection_annotation_and_csv(
         "bbox_h",
         "area",
     ]
-    assert [row["filename"] for row in rows] == ["black.png", "orange.jpg"]
+    assert [row["filename"] for row in rows] == [
+        "negative_001.png",
+        "orange_001.jpg",
+    ]
     assert rows[0] == {
-        "filename": "black.png",
+        "filename": "negative_001.png",
+        "expected": "negative",
         "detected": "false",
+        "classification": "TN",
         "center_x": "",
         "center_y": "",
         "bbox_x": "",
@@ -125,17 +137,28 @@ def test_batch_writes_two_output_pairs_no_detection_annotation_and_csv(
         "bbox_h": "",
         "area": "",
     }
+    assert rows[1]["expected"] == "positive"
     assert rows[1]["detected"] == "true"
+    assert rows[1]["classification"] == "TP"
     assert rows[1]["center_x"] != ""
     assert rows[1]["bbox_w"] != ""
     assert float(rows[1]["area"]) > 0
 
     terminal_output = capsys.readouterr().out
-    assert "[1/2] black.png -> NO DETECTION" in terminal_output
-    assert "[2/2] orange.jpg -> DETECTED" in terminal_output
+    assert "[1/2] negative_001.png -> NO DETECTION" in terminal_output
+    assert "[2/2] orange_001.jpg -> DETECTED" in terminal_output
     assert "Processed: 2" in terminal_output
     assert "Detected: 1" in terminal_output
     assert "No detection: 1" in terminal_output
+    assert "Labeled positive: 1" in terminal_output
+    assert "Labeled negative: 1" in terminal_output
+    assert "Unlabeled: 0" in terminal_output
+    assert "TP: 1" in terminal_output
+    assert "FN: 0" in terminal_output
+    assert "TN: 1" in terminal_output
+    assert "FP: 0" in terminal_output
+    assert "Recall: 1.0000" in terminal_output
+    assert "False positive rate: 0.0000" in terminal_output
     assert f"Output directory: {output_dir}" in terminal_output
 
 
@@ -182,3 +205,85 @@ def test_corrupt_image_does_not_stop_later_valid_image(
         rows = list(csv.DictReader(csv_file))
     assert [row["filename"] for row in rows] == ["valid.png"]
     assert "[1/2] broken.jpg -> ERROR: could not read image" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("filename", "detected", "expected", "classification"),
+    [
+        ("orange_001.jpg", True, "positive", "TP"),
+        ("orange_002.png", False, "positive", "FN"),
+        ("negative_001.jpeg", False, "negative", "TN"),
+        ("negative_002.bmp", True, "negative", "FP"),
+        ("other.jpg", True, "unknown", "UNLABELED"),
+    ],
+)
+def test_filename_expectation_and_classification(
+    filename: str,
+    detected: bool,
+    expected: str,
+    classification: str,
+) -> None:
+    batch = load_batch_module()
+
+    assert batch.expected_from_filename(filename) == expected
+    assert batch.classify_detection(expected, detected) == classification
+
+
+def test_rate_formatting_handles_zero_denominator() -> None:
+    batch = load_batch_module()
+
+    assert batch.format_rate(3, 4) == "0.7500"
+    assert batch.format_rate(0, 0) == "N/A"
+
+
+def test_batch_counts_all_classes_and_unlabeled(
+    tmp_path: Path,
+) -> None:
+    batch = load_batch_module()
+    input_dir = tmp_path / "images"
+    input_dir.mkdir()
+    write_image(input_dir / "orange_tp.jpg", orange_target=True)
+    write_image(input_dir / "orange_fn.jpg", orange_target=False)
+    write_image(input_dir / "negative_tn.jpg", orange_target=False)
+    write_image(input_dir / "negative_fp.jpg", orange_target=True)
+    write_image(input_dir / "scene.jpg", orange_target=True)
+    config_path = tmp_path / "config.yaml"
+    write_config(config_path)
+
+    summary = batch.run_batch(
+        input_dir,
+        config_path=config_path,
+        output_root=tmp_path / "outputs",
+        now=datetime(2026, 11, 13),
+    )
+
+    assert summary.processed == 5
+    assert summary.labeled_positive == 2
+    assert summary.labeled_negative == 2
+    assert summary.unlabeled == 1
+    assert summary.true_positive == 1
+    assert summary.false_negative == 1
+    assert summary.true_negative == 1
+    assert summary.false_positive == 1
+
+
+def test_unlabeled_only_batch_reports_na_rates(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    batch = load_batch_module()
+    input_dir = tmp_path / "images"
+    input_dir.mkdir()
+    write_image(input_dir / "scene.jpg", orange_target=False)
+    config_path = tmp_path / "config.yaml"
+    write_config(config_path)
+
+    batch.run_batch(
+        input_dir,
+        config_path=config_path,
+        output_root=tmp_path / "outputs",
+        now=datetime(2026, 11, 13),
+    )
+
+    terminal_output = capsys.readouterr().out
+    assert "Recall: N/A" in terminal_output
+    assert "False positive rate: N/A" in terminal_output

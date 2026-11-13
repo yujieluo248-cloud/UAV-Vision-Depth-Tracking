@@ -6,10 +6,10 @@ D435i-based UAV target visual detection and relative-state estimation.
 
 Phase 1 - color-based RGB target segmentation baseline.
 
-The current implementation processes a static BGR image with HSV color
-thresholding, morphology, and contour filtering. It produces a target mask,
-bounding box, center, and contour area. Depth, tracking, ROS, and camera access
-are not implemented in this phase.
+The current implementation processes BGR images with HSV color thresholding,
+morphology, and contour filtering. It produces a target mask, bounding box,
+center, and contour area. Static-image tools and an optional D435i RGB-only
+preview are available. Depth, tracking, and ROS are not implemented.
 
 ## Usage
 
@@ -80,6 +80,46 @@ This batch tool is only for offline evaluation of the current color-detection
 baseline. Internet images cannot determine the final D435i HSV parameters;
 calibrate them again using the real target material, a real D435i, and the
 actual experiment environment.
+
+Files named `orange_*` are evaluated as positive samples and files named
+`negative_*` as negative samples. Other names are included as `UNLABELED`.
+`results.csv` records TP, FN, TN, or FP for labeled images, and the terminal
+summary reports recall and false-positive rate (`N/A` when the corresponding
+labeled subset is empty).
+
+This classification only evaluates whether the detector produced any candidate.
+It does not measure bounding-box or mask quality. Review annotated outputs and
+record PASS/PARTIAL/FAIL manually when assessing localization and segmentation.
+
+## D435i RGB-only preview
+
+Install the Intel RealSense SDK and `pyrealsense2` in the runtime environment,
+then connect the D435i and run:
+
+```bash
+python tools/run_realsense_rgb.py
+```
+
+An explicit detector configuration and color-stream profile can be selected:
+
+```bash
+python tools/run_realsense_rgb.py \
+  --config configs/color_orange.yaml \
+  --width 640 --height 480 --fps 30
+```
+
+Controls:
+
+- `s`: save the current RGB frame, mask, and annotated image under
+  `outputs/realsense_rgb/YYYY-MM-DD/`
+- `q` / `ESC`: quit
+
+The default `640x480@30` profile is a starting point, not a guaranteed final
+deployment profile. Final HSV values must be recalibrated using the real target
+material, the real D435i color stream, and the actual deployment lighting.
+
+This tool uses only the D435i color stream. Depth, RGB-depth alignment, 3D
+position, tracking, ROS, and UAV control are not implemented.
 
 ## Image renaming
 

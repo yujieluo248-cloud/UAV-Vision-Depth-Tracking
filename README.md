@@ -51,3 +51,56 @@ Controls:
 Online test images can only verify the algorithm workflow. Final HSV values
 must be calibrated with the real target color material, a real D435i, and the
 actual deployment lighting.
+
+## Batch image testing
+
+```bash
+python tools/run_color_batch.py data/test_images/
+```
+
+Each run writes masks, annotated images, and a CSV summary to the current local
+date directory:
+
+```text
+outputs/test/YYYY-MM-DD/
+```
+
+For example:
+
+```text
+outputs/test/2026-11-13/
+├── orange_01_mask.png
+├── orange_01_annotated.png
+├── orange_02_mask.png
+├── orange_02_annotated.png
+└── results.csv
+```
+
+This batch tool is only for offline evaluation of the current color-detection
+baseline. Internet images cannot determine the final D435i HSV parameters;
+calibrate them again using the real target material, a real D435i, and the
+actual experiment environment.
+
+## Image renaming
+
+Preview a rename plan before changing files:
+
+```bash
+python tools/rename_images.py data/test_images \
+  --prefix orange \
+  --dry-run
+```
+
+Apply the reviewed plan:
+
+```bash
+python tools/rename_images.py data/test_images \
+  --prefix orange
+```
+
+Rename a negative-image set:
+
+```bash
+python tools/rename_images.py data/test_images \
+  --prefix negative
+```

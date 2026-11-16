@@ -1,0 +1,4 @@
+lower_hsv: [5, 100, 60]
+upper_hsv: [25, 255, 255]
+min_area: 100
+morph_kernel_size: 5

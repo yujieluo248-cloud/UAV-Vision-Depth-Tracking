@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 
 from src.detection.color_detector import ColorDetector
+from src.detection.candidate_selector import CandidateSelector
 from tools import run_realsense_rgb
 
 
@@ -39,6 +40,87 @@ def test_process_frame_returns_detection_mask_and_annotation() -> None:
     assert detection.mask.shape == frame.shape[:2]
     assert annotated.shape == frame.shape
     assert not np.array_equal(annotated, frame)
+
+
+def test_process_frame_uses_history_to_keep_smaller_near_target() -> None:
+    detector = ColorDetector(min_area=100)
+    selector = CandidateSelector(max_center_jump_ratio=0.25)
+    state = run_realsense_rgb.TemporalSelectionState(max_missed_frames=2)
+    orange = cv2.cvtColor(
+        np.uint8([[[15, 220, 220]]]), cv2.COLOR_HSV2BGR
+    )[0, 0].tolist()
+    first = np.zeros((200, 320, 3), dtype=np.uint8)
+    cv2.rectangle(first, (30, 60), (70, 100), orange, -1)
+
+    first_detection, _ = run_realsense_rgb.process_frame(
+        first, detector, selector=selector, state=state
+    )
+
+    assert first_detection.selection_mode == "ACQUIRE"
+    assert state.previous_center == (50.0, 80.0)
+
+    second = np.zeros_like(first)
+    cv2.rectangle(second, (35, 62), (75, 102), orange, -1)
+    cv2.rectangle(second, (180, 30), (300, 170), orange, -1)
+
+    second_detection, _ = run_realsense_rgb.process_frame(
+        second, detector, selector=selector, state=state
+    )
+
+    assert second_detection.selection_mode == "TRACK_ASSOCIATION"
+    assert second_detection.bbox == (35, 62, 41, 41)
+    assert second_detection.color_mask[50, 200] == 255
+    assert second_detection.target_mask[50, 200] == 0
+    assert second_detection.target_mask[80, 50] == 255
+
+
+def test_temporal_state_resets_after_miss_limit() -> None:
+    state = run_realsense_rgb.TemporalSelectionState(max_missed_frames=2)
+    state.previous_center = (50.0, 60.0)
+    state.previous_area = 1000.0
+
+    state.record_miss()
+    state.record_miss()
+
+    assert state.previous_center == (50.0, 60.0)
+    assert state.missed_frames == 2
+
+    state.record_miss()
+
+    assert state.previous_center is None
+    assert state.previous_area is None
+    assert state.missed_frames == 0
+
+
+def test_blank_frames_reset_history_then_next_target_reacquires() -> None:
+    detector = ColorDetector(min_area=100)
+    selector = CandidateSelector(max_center_jump_ratio=0.1)
+    state = run_realsense_rgb.TemporalSelectionState(max_missed_frames=1)
+    orange = cv2.cvtColor(
+        np.uint8([[[15, 220, 220]]]), cv2.COLOR_HSV2BGR
+    )[0, 0].tolist()
+    first = np.zeros((200, 320, 3), dtype=np.uint8)
+    cv2.rectangle(first, (20, 30), (60, 70), orange, -1)
+    blank = np.zeros_like(first)
+    far_reappearance = np.zeros_like(first)
+    cv2.rectangle(far_reappearance, (240, 130), (280, 170), orange, -1)
+
+    run_realsense_rgb.process_frame(
+        first, detector, selector=selector, state=state
+    )
+    run_realsense_rgb.process_frame(
+        blank, detector, selector=selector, state=state
+    )
+    run_realsense_rgb.process_frame(
+        blank, detector, selector=selector, state=state
+    )
+    detection, _ = run_realsense_rgb.process_frame(
+        far_reappearance, detector, selector=selector, state=state
+    )
+
+    assert detection.detected
+    assert detection.selection_mode == "ACQUIRE"
+    assert detection.bbox == (240, 130, 41, 41)
 
 
 def test_save_snapshot_uses_one_timestamp_and_date_directory(tmp_path: Path) -> None:

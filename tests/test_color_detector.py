@@ -75,6 +75,53 @@ def test_largest_valid_orange_region_is_selected() -> None:
     assert result.area == pytest.approx(10000.0)
 
 
+def test_detect_candidates_returns_every_valid_region_sorted_by_area() -> None:
+    image = make_bgr_image(width=320, height=220)
+    draw_orange_rectangle(image, (20, 30), (60, 70))
+    draw_orange_rectangle(image, (150, 40), (260, 170))
+
+    result = color_detector.ColorDetector(min_area=500).detect_candidates(image)
+
+    assert len(result.candidates) == 2
+    assert [candidate.bbox for candidate in result.candidates] == [
+        (150, 40, 111, 131),
+        (20, 30, 41, 41),
+    ]
+    large, small = result.candidates
+    assert large.center == pytest.approx((205.0, 105.0))
+    assert large.area == pytest.approx(14300.0)
+    assert large.aspect_ratio == pytest.approx(111 / 131)
+    assert large.fill_ratio == pytest.approx(14300 / (111 * 131))
+    assert small.area == pytest.approx(1600.0)
+    assert cv2.countNonZero(result.color_mask) > 0
+
+
+def test_color_mask_contains_all_candidates_but_target_mask_only_selected() -> None:
+    image = make_bgr_image(width=320, height=220)
+    draw_orange_rectangle(image, (20, 30), (70, 80))
+    draw_orange_rectangle(image, (150, 40), (270, 180))
+
+    result = color_detector.ColorDetector(min_area=500).detect(image)
+
+    assert result.detected
+    assert result.bbox == (150, 40, 121, 141)
+    assert result.color_mask[50, 30] == 255
+    assert result.color_mask[50, 170] == 255
+    assert result.target_mask[50, 30] == 0
+    assert result.target_mask[50, 170] == 255
+    assert np.array_equal(result.mask, result.target_mask)
+
+
+def test_color_detection_keeps_legacy_five_argument_constructor() -> None:
+    mask = np.zeros((10, 12), dtype=np.uint8)
+
+    result = color_detector.ColorDetection(False, None, None, 0.0, mask)
+
+    assert result.mask is mask
+    assert result.target_mask is mask
+    assert np.array_equal(result.color_mask, mask)
+
+
 def test_set_hsv_range_changes_subsequent_detection() -> None:
     image = make_bgr_image()
     green_bgr = cv2.cvtColor(

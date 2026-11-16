@@ -7,9 +7,42 @@ D435i-based UAV target visual detection and relative-state estimation.
 Phase 1 - color-based RGB target segmentation baseline.
 
 The current implementation processes BGR images with HSV color thresholding,
-morphology, and contour filtering. It produces a target mask, bounding box,
-center, and contour area. Static-image tools and an optional D435i RGB-only
-preview are available. Depth, tracking, and ROS are not implemented.
+morphology, and contour filtering. HSV is used for candidate generation, not
+final target identity. Static-image tools and an optional D435i RGB-only
+preview are available. Depth, full tracking, and ROS are not implemented.
+
+## Multi-candidate selection V2
+
+```text
+ColorDetector
+→ multiple color candidates
+→ CandidateSelector
+→ selected target mask
+→ future Depth / Tracking
+```
+
+`ColorDetector.detect_candidates()` exposes every connected component that
+passes the baseline minimum-area filter. Each candidate contains its contour,
+bounding box, center, area, aspect ratio, and fill ratio.
+
+`CandidateSelector` applies baseline bbox-size, fill-ratio, and aspect-ratio
+gates. With no history, acquisition uses the largest remaining valid candidate
+as a fallback. With a previous center and area, temporal association prefers a
+nearby candidate with a reasonable area change instead of switching directly
+to a larger orange region.
+
+The masks have different meanings:
+
+- `color_mask`: the full cleaned HSV segmentation, including all possible
+  orange regions
+- `target_mask` (legacy alias: `mask`): only the contour selected as the current
+  target
+
+The temporal association and its gate/score defaults are only a baseline, not
+a complete tracker or final optimized parameters. First acquisition remains
+ambiguous when multiple genuinely similar orange objects are visible: the
+largest-valid fallback cannot establish target identity. Future work may add
+tracking prediction, Depth, and 3D-size constraints to improve association.
 
 ## Usage
 
@@ -47,6 +80,11 @@ Controls:
 - sliders: adjust HSV
 - `s`: save config
 - `q` / `ESC`: quit
+
+The Detection window shows all candidates with thin boxes and highlights the
+selected target. The preview retains only the previous selected center and
+area; after a small number of consecutive misses it clears that history and
+returns to acquisition. This is minimal temporal continuity, not a tracker.
 
 Online test images can only verify the algorithm workflow. Final HSV values
 must be calibrated with the real target color material, a real D435i, and the

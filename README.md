@@ -4,12 +4,13 @@ D435i-based UAV target visual detection and relative-state estimation.
 
 ## Current phase
 
-Phase 1 - color-based RGB target segmentation baseline.
+Phase 2 - color-selected target depth measurement baseline.
 
 The current implementation processes BGR images with HSV color thresholding,
 morphology, and contour filtering. HSV is used for candidate generation, not
-final target identity. Static-image tools and an optional D435i RGB-only
-preview are available. Depth, full tracking, and ROS are not implemented.
+final target identity. Static-image tools, a D435i RGB-only preview, and an
+SDK-aligned RGB-D scalar depth preview are available. 3D positioning, full
+tracking, and ROS are not implemented.
 
 ## Multi-candidate selection V2
 
@@ -18,7 +19,8 @@ ColorDetector
 → multiple color candidates
 → CandidateSelector
 → selected target mask
-→ future Depth / Tracking
+→ aligned target depth
+→ future 3D / Tracking
 ```
 
 `ColorDetector.detect_candidates()` exposes every connected component that
@@ -156,8 +158,69 @@ The default `640x480@30` profile is a starting point, not a guaranteed final
 deployment profile. Final HSV values must be recalibrated using the real target
 material, the real D435i color stream, and the actual deployment lighting.
 
-This tool uses only the D435i color stream. Depth, RGB-depth alignment, 3D
-position, tracking, ROS, and UAV control are not implemented.
+This RGB-only tool intentionally uses only the D435i color stream. Use the RGB-D
+tool below when aligned target depth is required.
+
+## D435i aligned RGB-D target depth
+
+The RGB-D source enables color and depth streams, then uses the RealSense SDK:
+
+```text
+rs.align(rs.stream.color)
+```
+
+Depth is aligned to the color pixel grid before the selected target mask is
+applied. Raw Z16 values are converted with the device depth scale, and all
+calculation depth values use meters (`float32`). No handwritten RGB-depth
+extrinsic projection is used.
+
+Run with the current D435i color baseline:
+
+```bash
+python tools/run_realsense_rgbd.py \
+  --config configs/color_orange_d435i.yaml \
+  --width 640 --height 480 --fps 30
+```
+
+The defaults remain configurable. Relevant experimental depth defaults are:
+
+```text
+mask erosion:        3x3, 1 iteration
+valid depth range:   0.2–10.0 m
+minimum pixels:      20
+minimum valid ratio: 0.5
+maximum depth std:   0.3 m
+```
+
+The target mask is eroded before depth lookup to reduce mixed target/background
+edge pixels. If erosion completely removes a non-empty small target, the
+baseline falls back to the original target mask. Zero, NaN, Inf, and
+out-of-range values are removed. The reported distance is the median of valid
+target pixels; validity also requires the pixel-count, valid-ratio, and depth
+standard-deviation thresholds to pass. Invalid measurements display `DEPTH
+INVALID` and do not expose a numeric depth.
+
+Windows:
+
+- `RGB`
+- `Mask` (selected target only)
+- `Detection` (selection plus depth quality)
+- `Aligned Depth` (display-only colormap; never used for measurement)
+
+Controls:
+
+- `s`: save RGB, target mask, annotation, depth visualization, and JSON metadata
+  under `outputs/realsense_rgbd/YYYY-MM-DD/`
+- `q` / `ESC`: quit
+
+The current orange test can is a reflective curved metal target. Its highlights
+and depth edges may be unstable, so it is suitable only for validating the
+RGB-depth pipeline. Validate later with a matte orange object and the final UAV
+orange marking. No can-specific behavior is hard-coded.
+
+This stage measures one scalar target depth only. It does not implement 3D
+deprojection, camera-to-body extrinsics, world coordinates, ROS, PX4, YOLO,
+complete tracking, or UAV control.
 
 ## Image renaming
 

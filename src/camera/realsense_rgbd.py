@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 import importlib
+import warnings
 from typing import Any
 
 import numpy as np
@@ -20,6 +21,8 @@ class RGBDFrame:
     color_bgr: np.ndarray
     depth_m: np.ndarray
     timestamp_ms: float
+    aligned_intrinsics: Any | None = None
+    color_intrinsics: Any | None = None
 
 
 class RealSenseRGBDSource:
@@ -42,6 +45,7 @@ class RealSenseRGBDSource:
         self._pipeline: Any | None = None
         self._aligner: Any | None = None
         self._depth_scale: float | None = None
+        self._printed_intrinsics = False
 
     def _get_rs_module(self) -> Any:
         if self._rs_module is not None:
@@ -90,6 +94,7 @@ class RealSenseRGBDSource:
         self._pipeline = pipeline
         self._aligner = aligner
         self._depth_scale = depth_scale
+        self._printed_intrinsics = False
 
     def read(self) -> RGBDFrame | None:
         """Return aligned BGR/depth data, with depth converted to meters."""
@@ -119,10 +124,28 @@ class RealSenseRGBDSource:
             )
 
         depth_m = depth_raw.astype(np.float32) * self._depth_scale
+        aligned_intrinsics = depth_frame.profile.as_video_stream_profile().get_intrinsics()
+        color_intrinsics = color_frame.profile.as_video_stream_profile().get_intrinsics()
+        if (aligned_intrinsics.width, aligned_intrinsics.height) != (color_bgr.shape[1], color_bgr.shape[0]):
+            raise RuntimeError('Aligned intrinsics dimensions do not match current pixel grid')
+        if not self._printed_intrinsics:
+            from src.geometry.deprojection import intrinsics_snapshot
+            print('Aligned camera intrinsics:')
+            for name, value in intrinsics_snapshot(aligned_intrinsics).items():
+                print(f'{name} = {value}')
+            mismatch = any(
+                not np.isclose(getattr(aligned_intrinsics, key), getattr(color_intrinsics, key), rtol=1e-4, atol=1e-3)
+                for key in ('width', 'height', 'fx', 'fy', 'ppx', 'ppy')
+            )
+            if mismatch or aligned_intrinsics.model != color_intrinsics.model or not np.allclose(aligned_intrinsics.coeffs, color_intrinsics.coeffs):
+                warnings.warn('Aligned depth and color intrinsics differ; check current profiles and pixel-grid consistency.', RuntimeWarning)
+            self._printed_intrinsics = True
         return RGBDFrame(
             color_bgr=color_bgr,
             depth_m=depth_m,
             timestamp_ms=float(color_frame.get_timestamp()),
+            aligned_intrinsics=aligned_intrinsics,
+            color_intrinsics=color_intrinsics,
         )
 
     def stop(self) -> None:

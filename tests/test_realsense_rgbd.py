@@ -9,6 +9,9 @@ class FakeFrame:
     def __init__(self, data: np.ndarray, timestamp_ms: float = 0.0) -> None:
         self._data = data
         self._timestamp_ms = timestamp_ms
+        height, width = data.shape[:2]
+        intr = SimpleNamespace(width=width, height=height, fx=600., fy=600., ppx=width/2, ppy=height/2, model='none', coeffs=[0.]*5)
+        self.profile = SimpleNamespace(as_video_stream_profile=lambda: SimpleNamespace(get_intrinsics=lambda: intr))
 
     def get_data(self) -> np.ndarray:
         return self._data
@@ -122,6 +125,24 @@ def test_module_import_does_not_require_pyrealsense2() -> None:
 
     assert hasattr(module, "RealSenseRGBDSource")
     assert hasattr(module, "RGBDFrame")
+
+
+def test_intrinsics_are_frame_profiles_printed_once_and_mismatch_warns(capsys):
+    module = importlib.import_module('src.camera.realsense_rgbd')
+    fake, pipeline, config, aligner, targets = make_fake_rs(
+        np.zeros((2, 3, 3), np.uint8), np.ones((2, 3), np.uint16))
+    aligned = aligner.aligned_frames.get_depth_frame().profile.as_video_stream_profile().get_intrinsics()
+    color = aligner.aligned_frames.get_color_frame().profile.as_video_stream_profile().get_intrinsics()
+    aligned.fx = 601.
+    source = module.RealSenseRGBDSource(rs_module=fake)
+    source.start()
+    with pytest.warns(RuntimeWarning, match='intrinsics differ'):
+        frame = source.read()
+    source.read()
+    source.stop()
+    assert frame.aligned_intrinsics is aligned
+    assert frame.color_intrinsics is color
+    assert capsys.readouterr().out.count('Aligned camera intrinsics:') == 1
 
 
 def test_start_configures_color_depth_and_alignment_then_reads_meters() -> None:

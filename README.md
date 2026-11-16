@@ -1,5 +1,34 @@
 # UAV Vision Depth Tracking
 
+## Camera-frame target position
+
+The RGBD preview now deprojects the selected candidate's floating-point center
+using its target-mask median depth. This produces a representative target point,
+not a point-cloud centroid. The intrinsics come directly from each aligned
+depth frame's `profile.as_video_stream_profile().get_intrinsics()`; color-frame
+intrinsics are also read for diagnostics. The first valid frame prints the
+aligned intrinsics once, with a warning if color and aligned-depth profiles
+disagree. No stored or hard-coded camera calibration is used.
+
+Production deprojection calls RealSense `rs2_deproject_pixel_to_point`, retaining
+the SDK distortion model and coefficients. Coordinates are meters in the camera
+optical frame: +X right, +Y down, +Z forward. Z must agree with input depth.
+Invalid target, depth, pixel, intrinsics, or SDK output produces `3D INVALID`.
+The Detection window shows current X/Y/Z alongside depth quality. Snapshots add
+`position_valid`, `target_pixel`, `camera_position_m`, and a frame intrinsics
+snapshot (including model and coefficients); invalid positions are JSON null.
+
+```bash
+python tools/run_realsense_rgbd.py \
+  --config configs/color_orange_tape_d435i.yaml \
+  --width 640 --height 480 --fps 30
+```
+
+Hardware acceptance is manual: center gives X/Y near zero; right/left changes
+X positive/negative; down/up changes Y positive/negative; farther/nearer changes
+Z larger/smaller. No body/world transform, extrinsics, velocity estimation,
+ROS, PX4, flight control, YOLO, or complete tracking is implemented.
+
 D435i-based UAV target visual detection and relative-state estimation.
 
 ## Current phase
@@ -9,8 +38,8 @@ Phase 2 - color-selected target depth measurement baseline.
 The current implementation processes BGR images with HSV color thresholding,
 morphology, and contour filtering. HSV is used for candidate generation, not
 final target identity. Static-image tools, a D435i RGB-only preview, and an
-SDK-aligned RGB-D scalar depth preview are available. 3D positioning, full
-tracking, and ROS are not implemented.
+SDK-aligned RGB-D camera optical position preview are available. Full tracking
+and ROS are not implemented.
 
 ## Multi-candidate selection V2
 
@@ -20,7 +49,8 @@ ColorDetector
 → CandidateSelector
 → selected target mask
 → aligned target depth
-→ future 3D / Tracking
+→ camera optical position
+→ future Tracking
 ```
 
 `ColorDetector.detect_candidates()` exposes every connected component that
@@ -218,9 +248,9 @@ and depth edges may be unstable, so it is suitable only for validating the
 RGB-depth pipeline. Validate later with a matte orange object and the final UAV
 orange marking. No can-specific behavior is hard-coded.
 
-This stage measures one scalar target depth only. It does not implement 3D
-deprojection, camera-to-body extrinsics, world coordinates, ROS, PX4, YOLO,
-complete tracking, or UAV control.
+The depth extractor measures scalar depth; the camera-position stage then uses
+SDK deprojection. Camera-to-body extrinsics, world coordinates, ROS, PX4, YOLO,
+complete tracking, and UAV control are not implemented.
 
 ## Target tape color calibration
 

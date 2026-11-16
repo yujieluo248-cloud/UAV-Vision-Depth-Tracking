@@ -19,12 +19,36 @@ from src.camera.realsense_rgbd import RGBDFrame, RealSenseRGBDSource
 from src.depth.target_depth import TargetDepthExtractor, TargetDepthMeasurement
 from src.detection.candidate_selector import CandidateSelector
 from src.detection.color_detector import ColorDetection, ColorDetector
+from src.geometry.deprojection import TargetPosition3D, deproject_target, intrinsics_snapshot
 from tools.run_color_image import load_config
 from tools.run_realsense_rgb import TemporalSelectionState, process_frame
 
 
 DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "color_orange_d435i.yaml"
 DEFAULT_OUTPUT_ROOT = Path("outputs/realsense_rgbd")
+
+
+def target_position(frame, detection, measurement, *, deproject_fn=None):
+    """Representative point: selected floating center + mask median depth."""
+    if not detection.detected or not measurement.valid:
+        return TargetPosition3D()
+    selected = next((candidate for candidate in detection.candidates
+                     if candidate.bbox == detection.bbox), None)
+    center = selected.center if selected is not None else detection.center
+    if center is None:
+        return TargetPosition3D()
+    return deproject_target(*center, measurement.depth_m, frame.aligned_intrinsics,
+                            deproject_fn=deproject_fn)
+
+
+def annotate_position(annotated, position):
+    output = annotated.copy()
+    lines = ([f'X: {position.x_m:+.3f} m', f'Y: {position.y_m:+.3f} m',
+              f'Z: {position.z_m:.3f} m'] if position.valid else ['3D INVALID'])
+    for index, line in enumerate(lines):
+        cv2.putText(output, line, (10, 110 + 25 * index), cv2.FONT_HERSHEY_SIMPLEX,
+                    .65, (0, 255, 0) if position.valid else (0, 0, 255), 2, cv2.LINE_AA)
+    return output
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -145,6 +169,7 @@ def save_rgbd_snapshot(
     *,
     output_root: Path = DEFAULT_OUTPUT_ROOT,
     now: datetime | None = None,
+    position: TargetPosition3D | None = None,
 ) -> tuple[Path, Path, Path, Path, Path]:
     timestamp = now if now is not None else datetime.now()
     date_text = timestamp.strftime("%Y-%m-%d")
@@ -174,6 +199,15 @@ def save_rgbd_snapshot(
         "total_count": measurement.total_count,
         "depth_std_m": measurement.depth_std_m,
     }
+    if position is not None:
+        metadata.update(
+            position_valid=position.valid,
+            target_pixel=(dict(u=position.pixel_u, v=position.pixel_v)
+                          if position.pixel_u is not None else None),
+            camera_position_m=(dict(x=position.x_m, y=position.y_m, z=position.z_m)
+                               if position.valid else None),
+            intrinsics=intrinsics_snapshot(frame.aligned_intrinsics),
+        )
     try:
         paths[4].write_text(
             json.dumps(metadata, indent=2, ensure_ascii=False) + "\n",
@@ -213,6 +247,8 @@ def run_preview(
                         state=state,
                     )
                 )
+                position = target_position(frame, detection, measurement)
+                annotated = annotate_position(annotated, position)
                 show("RGB", frame.color_bgr)
                 show("Mask", detection.target_mask)
                 show("Detection", annotated)
@@ -229,6 +265,7 @@ def run_preview(
                     depth_visualization,
                     measurement,
                     output_root=output_root,
+                    position=position,
                 )
                 print(f"Saved RGB-D snapshot to: {paths[0].parent}")
     finally:

@@ -222,7 +222,39 @@ This stage measures one scalar target depth only. It does not implement 3D
 deprojection, camera-to-body extrinsics, world coordinates, ROS, PX4, YOLO,
 complete tracking, or UAV control.
 
-## Image renaming
+## Target tape color calibration
+
+Calibrate the specific saturated orange tape used on the UAV with real D435i
+RGB frames. The system can target this material rather than all orange objects.
+Phone-photo colors cannot establish the final HSV thresholds. Collect multiple
+ROIs across distances, viewing angles, lighting conditions, and tape locations;
+do not calibrate from just one frame.
+
+```bash
+python tools/calibrate_target_color.py --width 640 --height 480 --fps 30
+```
+
+Drag with the left mouse button to select an ROI. The image freezes while the
+ROI is reviewed; release prints its statistics. Press `c` to add it once, then
+select another ROI. `r` clears the session, `s` generates YAML/report, and
+`q` / ESC exits. ROI bounds use the original camera pixel dimensions.
+
+Calibration excludes pixels with S < 80 or V < 50. This prefilter only removes
+obviously achromatic/dark pixels; users should tightly select tape to avoid
+colored background contamination. All accepted ROI pixels are pooled with pixel
+weighting. H/S/V median and p5/p95 are reported with valid counts and ratios.
+The generated range uses p5/p95 plus baseline margins H=2, S=15, V=15, rounded
+outward and bounded to OpenCV HSV ranges. These margins are experimental, not
+optimal final parameters. Hue seam-crossing or ambiguous wide samples are
+explicitly rejected because the detector accepts only one non-wrapping range.
+
+Default YAML: `configs/color_orange_tape_d435i.yaml`, with fixed `min_area: 100`
+and `morph_kernel_size: 5`. Existing YAML files are never overwritten: choose a
+new path using `--save-config`. Timestamped reports go under
+`outputs/color_calibration/YYYY-MM-DD/`. The generated HSV range is a baseline
+for the actual tape, camera, and sampled deployment conditions.
+
+## Image renaming commands
 
 Preview a rename plan before changing files:
 
